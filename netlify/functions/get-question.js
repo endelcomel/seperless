@@ -36,8 +36,10 @@ exports.handler = async (event, context) => {
     // Dekompresi Gzip
     const decompressedData = zlib.gunzipSync(compressedData);
 
+    // Cari tipe Protobuf dengan namespace yang tepat
+    const Question = root.lookupType('nested.Question');
+
     // Deserialisasi Protobuf
-    const Question = root.lookupType('Question');
     const question = Question.decode(decompressedData);
     const jsonData = Question.toObject(question, { enums: String, longs: String });
 

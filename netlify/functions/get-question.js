@@ -12,7 +12,7 @@ const availableFiles = [
 ];
 
 // URL dasar untuk file .bin.gz
-const baseUrl = "https://67d05db5139bcc719f8506a9--pusat-api.netlify.app/";
+const baseUrl = "https://67d3eaeaf12b5b2677eef48a--pusat-api.netlify.app/";
 
 // Handler untuk serverless function
 exports.handler = async (event, context) => {

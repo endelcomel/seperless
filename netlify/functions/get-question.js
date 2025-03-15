@@ -5,17 +5,17 @@ const protobuf = require('protobufjs');
 // Daftar rentang file dan baseUrl
 const fileRanges = [
   {
-    baseUrl: "https://67d4d639423cb651d341c988--pusat-api.netlify.app/",
+    baseUrl: "https://67d4d639423cb651d341c988--pusat-api.netlify.app",
     start: 45358102,
     end: 56237543
   },
   {
-    baseUrl: "https://67d4d63dcf00c45c95782a6a--pusat-api.netlify.app/",
+    baseUrl: "https://67d4d63dcf00c45c95782a6a--pusat-api.netlify.app",
     start: 45359902,
     end: 56241290
   },
   {
-    baseUrl: "https://67d4d64b653aef522502b7ef--pusat-api.netlify.app/",
+    baseUrl: "https://67d4d64b653aef522502b7ef--pusat-api.netlify.app",
     start: 45359865,
     end: 56241514
   }

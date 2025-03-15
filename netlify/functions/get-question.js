@@ -2,35 +2,59 @@ const axios = require('axios');
 const zlib = require('zlib');
 const protobuf = require('protobufjs');
 
-// Daftar file .bin.gz yang tersedia di pusat-api.netlify.app
-const availableFiles = [
-  "question.bin.gz",
-  "question.bin.gz",
-  "question.bin.gz",
-  "question.bin.gz",
-  "question.bin.gz",
+// Daftar rentang file dengan URL
+const fileRanges = [
+  { baseUrl: "https://67d4d639423cb651d341c988--pusat-api.netlify.app/", start: "45358102.bin.gz", end: "56237543.bin.gz" },
+  { baseUrl: "https://67d4d63dcf00c45c95782a6a--pusat-api.netlify.app/", start: "45359902.bin.gz", end: "56241290.bin.gz" },
+  { baseUrl: "https://67d4d64b653aef522502b7ef--pusat-api.netlify.app/", start: "45359865.bin.gz", end: "56241514.bin.gz" }
 ];
 
-// URL dasar untuk file .bin.gz
-const baseUrl = "https://67d3eaeaf12b5b2677eef48a--pusat-api.netlify.app/";
-
-// Handler untuk serverless function
 exports.handler = async (event, context) => {
   try {
-    // Parse payload dari request body
     const payload = JSON.parse(event.body);
-
-    // Validasi payload
     if (!payload.max || !payload.target) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "Payload harus berisi 'max' dan 'target'" })
-      };
+      return { statusCode: 400, body: JSON.stringify({ error: "Payload harus berisi 'max' dan 'target'" }) };
+    }
+    
+    const { max, target } = payload;
+    
+    // Cari rentang yang sesuai dengan target
+    let selectedRange = fileRanges.find(range => target >= range.start && target <= range.end);
+    if (!selectedRange) {
+      return { statusCode: 404, body: JSON.stringify({ error: `File '${target}' tidak termasuk dalam rentang yang tersedia` }) };
     }
 
-    const { max, target } = payload;
+    const fetchFile = async (file) => {
+      try {
+        const response = await axios.get(`${selectedRange.baseUrl}${file}`, { responseType: 'arraybuffer' });
+        return response.data;
+      } catch (error) {
+        if (error.response && error.response.status === 404) {
+          return null;
+        }
+        throw error;
+      }
+    };
+    
+    let fileData = await fetchFile(target);
+    if (!fileData) {
+      // Jika file tidak ditemukan, pilih file acak dari rentang
+      const randomFileNumber = Math.floor(Math.random() * (parseInt(selectedRange.end) - parseInt(selectedRange.start))) + parseInt(selectedRange.start);
+      const randomFile = `${randomFileNumber}.bin.gz`;
+      fileData = await fetchFile(randomFile);
+      if (!fileData) {
+        return { statusCode: 404, body: JSON.stringify({ error: `Tidak ada file yang dapat diambil dalam rentang ${selectedRange.start} - ${selectedRange.end}` }) };
+      }
+    }
+    
+    // Dekompresi dan decode data Protobuf
+    const buffer = await new Promise((resolve, reject) => {
+      zlib.gunzip(fileData, (err, buffer) => {
+        if (err) reject(err);
+        else resolve(buffer);
+      });
+    });
 
-    // Skema Protobuf (embed dalam kode)
     const root = protobuf.Root.fromJSON({
       nested: {
         Question: {
@@ -50,67 +74,18 @@ exports.handler = async (event, context) => {
         }
       }
     });
-
+    
     const Question = root.lookupType("Question");
-
-    // Fungsi untuk mengunduh dan memproses satu file .bin.gz
-    const fetchData = async (file) => {
-      const gzipUrl = `${baseUrl}${file}`;
-      const response = await axios({
-        method: 'get',
-        url: gzipUrl,
-        responseType: 'arraybuffer'
-      });
-
-      const buffer = await new Promise((resolve, reject) => {
-        zlib.gunzip(response.data, (err, buffer) => {
-          if (err) reject(err);
-          else resolve(buffer);
-        });
-      });
-
-      const message = Question.decode(buffer);
-      return Question.toObject(message, { longs: String, enums: String, bytes: String });
+    const message = Question.decode(buffer);
+    const result = Question.toObject(message, { longs: String, enums: String, bytes: String });
+    
+    return {
+      statusCode: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(result)
     };
-
-    // Handle permintaan berdasarkan target
-    if (target === "random") {
-      // Pilih file secara acak sebanyak max
-      const randomFiles = [];
-      for (let i = 0; i < max && i < availableFiles.length; i++) {
-        const randomIndex = Math.floor(Math.random() * availableFiles.length);
-        randomFiles.push(availableFiles[randomIndex]);
-      }
-
-      // Unduh dan proses data dari file-file yang dipilih
-      const results = await Promise.all(randomFiles.map(fetchData));
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(results)
-      };
-    } else {
-      // Cek apakah target ada di daftar file yang tersedia
-      if (!availableFiles.includes(target)) {
-        return {
-          statusCode: 404,
-          body: JSON.stringify({ error: `File '${target}' tidak ditemukan` })
-        };
-      }
-
-      // Unduh dan proses data dari file target
-      const result = await fetchData(target);
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(result)
-      };
-    }
   } catch (error) {
     console.error("Error:", error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Internal Server Error" })
-    };
+    return { statusCode: 500, body: JSON.stringify({ error: "Internal Server Error" }) };
   }
 };

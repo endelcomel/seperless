@@ -2,17 +2,24 @@ const axios = require('axios');
 const zlib = require('zlib');
 const protobuf = require('protobufjs');
 
-// Daftar file .bin.gz yang tersedia di pusat-api.netlify.app
-const availableFiles = [
-  "question.bin.gz",
-  "question.bin.gz",
-  "question.bin.gz",
-  "question.bin.gz",
-  "question.bin.gz",
+// Daftar rentang file dan baseUrl
+const fileRanges = [
+  {
+    baseUrl: "https://67d4d639423cb651d341c988--pusat-api.netlify.app",
+    start: 45358102,
+    end: 56237543
+  },
+  {
+    baseUrl: "https://67d4d63dcf00c45c95782a6a--pusat-api.netlify.app",
+    start: 45359902,
+    end: 56241290
+  },
+  {
+    baseUrl: "https://67d4d64b653aef522502b7ef--pusat-api.netlify.app",
+    start: 45359865,
+    end: 56241514
+  }
 ];
-
-// URL dasar untuk file .bin.gz
-const baseUrl = "https://67d42f315558054a2bcba5f5--pusat-api.netlify.app/";
 
 // Handler untuk serverless function
 exports.handler = async (event, context) => {
@@ -54,8 +61,8 @@ exports.handler = async (event, context) => {
     const Question = root.lookupType("Question");
 
     // Fungsi untuk mengunduh dan memproses satu file .bin.gz
-    const fetchData = async (file) => {
-      const gzipUrl = `${baseUrl}${file}`;
+    const fetchData = async (baseUrl, file) => {
+      const gzipUrl = `${baseUrl}/${file}`;
       const response = await axios({
         method: 'get',
         url: gzipUrl,
@@ -75,31 +82,44 @@ exports.handler = async (event, context) => {
 
     // Handle permintaan berdasarkan target
     if (target === "random") {
-      // Pilih file secara acak sebanyak max
-      const randomFiles = [];
-      for (let i = 0; i < max && i < availableFiles.length; i++) {
-        const randomIndex = Math.floor(Math.random() * availableFiles.length);
-        randomFiles.push(availableFiles[randomIndex]);
-      }
+      // Pilih rentang secara random
+      const randomRange = fileRanges[Math.floor(Math.random() * fileRanges.length)];
+      const { baseUrl, start, end } = randomRange;
 
-      // Unduh dan proses data dari file-file yang dipilih
-      const results = await Promise.all(randomFiles.map(fetchData));
+      // Pilih nomor file secara random dalam rentang
+      const randomFileNumber = Math.floor(Math.random() * (end - start + 1)) + start;
+      const randomFile = `${randomFileNumber}.bin.gz`;
+
+      // Unduh dan proses data dari file yang dipilih
+      const result = await fetchData(baseUrl, randomFile);
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(results)
+        body: JSON.stringify(result)
       };
     } else {
-      // Cek apakah target ada di daftar file yang tersedia
-      if (!availableFiles.includes(target)) {
+      // Ekstrak nomor file dari target
+      const fileNumber = parseInt(target.split('.')[0], 10);
+      if (isNaN(fileNumber)) {
         return {
-          statusCode: 404,
-          body: JSON.stringify({ error: `File '${target}' tidak ditemukan` })
+          statusCode: 400,
+          body: JSON.stringify({ error: "Format target tidak valid" })
         };
       }
 
+      // Cari baseUrl yang sesuai dengan rentang
+      const selectedRange = fileRanges.find(range => fileNumber >= range.start && fileNumber <= range.end);
+      if (!selectedRange) {
+        return {
+          statusCode: 404,
+          body: JSON.stringify({ error: `File '${target}' tidak ditemukan dalam rentang yang tersedia` })
+        };
+      }
+
+      const baseUrl = selectedRange.baseUrl;
+
       // Unduh dan proses data dari file target
-      const result = await fetchData(target);
+      const result = await fetchData(baseUrl, target);
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },

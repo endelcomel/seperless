@@ -62,22 +62,56 @@ exports.handler = async (event, context) => {
       return Question.toObject(message, { longs: String, enums: String, bytes: String });
     };
 
+    // Fungsi untuk memvalidasi keberadaan file
+    const validateFileExists = async (baseUrl, file) => {
+      try {
+        const response = await axios.head(`${baseUrl}/${file}`);
+        return response.status === 200; // File ditemukan jika status 200
+      } catch (error) {
+        return false; // File tidak ditemukan
+      }
+    };
+
     // Handle permintaan berdasarkan target
     if (target === "random") {
-      // Pilih rentang secara random
-      const randomRange = fileRanges[Math.floor(Math.random() * fileRanges.length)];
-      const { baseUrl, start, end } = randomRange;
+      const results = [];
+      const selectedFiles = new Set(); // Untuk menghindari duplikasi file
 
-      // Pilih nomor file secara random dalam rentang
-      const randomFileNumber = Math.floor(Math.random() * (end - start + 1)) + start;
-      const randomFile = `${randomFileNumber}.bin.gz`;
+      for (let i = 0; i < max; i++) {
+        let randomFile, baseUrl;
 
-      // Unduh dan proses data dari file yang dipilih
-      const result = await fetchData(baseUrl, randomFile);
+        // Loop untuk memastikan file yang dipilih benar-benar ada dan tidak duplikat
+        while (true) {
+          // Pilih rentang secara random
+          const randomRange = fileRanges[Math.floor(Math.random() * fileRanges.length)];
+          baseUrl = randomRange.baseUrl;
+          const { start, end } = randomRange;
+
+          // Hasilkan nomor file acak dalam rentang
+          const randomFileNumber = Math.floor(Math.random() * (end - start + 1)) + start;
+          randomFile = `${randomFileNumber}.bin.gz`;
+
+          // Cek apakah file sudah dipilih atau tidak
+          if (selectedFiles.has(randomFile)) continue;
+
+          // Validasi keberadaan file
+          const fileExists = await validateFileExists(baseUrl, randomFile);
+          if (fileExists) {
+            selectedFiles.add(randomFile); // Tandai file sebagai telah dipilih
+            break; // Keluar dari loop jika file valid
+          }
+        }
+
+        // Unduh dan proses data dari file yang dipilih
+        const result = await fetchData(baseUrl, randomFile);
+        results.push(result);
+      }
+
+      // Kembalikan hasil sebagai array
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(result)
+        body: JSON.stringify(results)
       };
     } else {
       // Ekstrak nomor file dari target
@@ -100,7 +134,27 @@ exports.handler = async (event, context) => {
 
       const baseUrl = selectedRange.baseUrl;
 
-      // Unduh dan proses data dari file target
+      // Validasi keberadaan file
+      const fileExists = await validateFileExists(baseUrl, target);
+      if (!fileExists) {
+        // Jika file tidak ditemukan, cari file random dari rentang yang sesuai
+        let randomFile;
+        do {
+          const { start, end } = selectedRange;
+          const randomFileNumber = Math.floor(Math.random() * (end - start + 1)) + start;
+          randomFile = `${randomFileNumber}.bin.gz`;
+        } while (!(await validateFileExists(baseUrl, randomFile)));
+
+        // Unduh dan proses file random
+        const result = await fetchData(baseUrl, randomFile);
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(result)
+        };
+      }
+
+      // Jika file ditemukan, unduh dan proses file tersebut
       const result = await fetchData(baseUrl, target);
       return {
         statusCode: 200,

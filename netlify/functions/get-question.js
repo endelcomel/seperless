@@ -3,18 +3,37 @@ const zlib = require('zlib');
 const protobuf = require('protobufjs');
 const { fileRanges } = require('./config'); // Impor fileRanges
 
+// Fungsi untuk menambahkan header CORS
+const addCorsHeaders = (response) => {
+  response.headers = {
+    ...response.headers,
+    'Access-Control-Allow-Origin': '*', // Izinkan semua domain (* untuk development)
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', // Metode yang diizinkan
+    'Access-Control-Allow-Headers': 'Content-Type', // Header yang diizinkan
+  };
+  return response;
+};
+
 // Handler untuk serverless function
 exports.handler = async (event, context) => {
   try {
+    // Handle preflight request (OPTIONS)
+    if (event.httpMethod === 'OPTIONS') {
+      return addCorsHeaders({
+        statusCode: 204, // No Content
+        body: ''
+      });
+    }
+
     // Parse payload dari request body
     const payload = JSON.parse(event.body);
 
     // Validasi payload
     if (!payload.max || !payload.target) {
-      return {
+      return addCorsHeaders({
         statusCode: 200,
         body: JSON.stringify({ message: "Payload tidak valid. Menggunakan fallback ke mode random." }),
-      };
+      });
     }
 
     const { max, target } = payload;
@@ -132,11 +151,11 @@ exports.handler = async (event, context) => {
       }
 
       // Kembalikan hasil sebagai array
-      return {
+      return addCorsHeaders({
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(results)
-      };
+      });
     } else {
       // Ekstrak nomor file dari target
       const fileNumber = parseInt(target.split('.')[0], 10);
@@ -144,11 +163,11 @@ exports.handler = async (event, context) => {
         // Jika format target tidak valid, fallback ke mode random
         console.log("Format target tidak valid. Falling back to random data...");
         const randomResult = await getRandomData();
-        return {
+        return addCorsHeaders({
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(randomResult)
-        };
+        });
       }
 
       // Cari baseUrl yang sesuai dengan rentang
@@ -157,11 +176,11 @@ exports.handler = async (event, context) => {
         // Jika file tidak ditemukan dalam rentang, fallback ke mode random
         console.log("File tidak ditemukan dalam rentang. Falling back to random data...");
         const randomResult = await getRandomData();
-        return {
+        return addCorsHeaders({
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(randomResult)
-        };
+        });
       }
 
       const baseUrl = selectedRange.baseUrl;
@@ -169,22 +188,22 @@ exports.handler = async (event, context) => {
       try {
         // Unduh dan proses data dari file target
         const result = await fetchData(baseUrl, target);
-        return {
+        return addCorsHeaders({
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(result)
-        };
+        });
       } catch (error) {
         console.error("Error fetching specific file:", error);
 
         // Fallback ke mode random jika terjadi error
         console.log("Terjadi error. Falling back to random data...");
         const randomResult = await getRandomData();
-        return {
+        return addCorsHeaders({
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(randomResult)
-        };
+        });
       }
     }
   } catch (error) {
@@ -194,20 +213,20 @@ exports.handler = async (event, context) => {
     console.log("Terjadi error kritis. Falling back to random data...");
     try {
       const randomResult = await getRandomData();
-      return {
+      return addCorsHeaders({
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(randomResult)
-      };
+      });
     } catch (fallbackError) {
       console.error("Fallback juga gagal:", fallbackError);
 
       // Jika semuanya gagal, kembalikan pesan default
-      return {
+      return addCorsHeaders({
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: "Tidak dapat mengambil data. Silakan coba lagi nanti." })
-      };
+      });
     }
   }
 };

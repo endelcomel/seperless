@@ -1,5 +1,4 @@
 const axios = require('axios');
-const zlib = require('zlib');
 const protobuf = require('protobufjs');
 const { fileRanges } = require('./config'); // Impor fileRanges
 
@@ -42,72 +41,60 @@ exports.handler = async (event, context) => {
 
     const Question = root.lookupType("Question");
 
-    // Fungsi untuk mengunduh dan memproses satu file .bin.gz
-    const fetchData = async (baseUrl, file) => {
-      const gzipUrl = `${baseUrl}/${file}`;
-      const response = await axios({
-        method: 'get',
-        url: gzipUrl,
-        responseType: 'arraybuffer'
-      });
-
-      const buffer = await new Promise((resolve, reject) => {
-        zlib.gunzip(response.data, (err, buffer) => {
-          if (err) reject(err);
-          else resolve(buffer);
-        });
-      });
-
-      const message = Question.decode(buffer);
-      return Question.toObject(message, { longs: String, enums: String, bytes: String });
+    // Fungsi untuk mengambil data dari API
+    const fetchDataFromAPI = async (baseUrl, file) => {
+      const apiUrl = `${baseUrl}/${file}`;
+      try {
+        const response = await axios.get(apiUrl);
+        return response.data; // Asumsikan API mengembalikan data JSON
+      } catch (error) {
+        if (error.response && error.response.status === 404) {
+          throw new Error(`Data '${file}' tidak ditemukan`);
+        }
+        throw error;
+      }
     };
 
-    // Fungsi untuk memvalidasi keberadaan file
-    const validateFileExists = async (baseUrl, file) => {
-      try {
-        const response = await axios.head(`${baseUrl}/${file}`);
-        return response.status === 200; // File ditemukan jika status 200
-      } catch (error) {
-        return false; // File tidak ditemukan
+    // Fungsi untuk mendapatkan data random dari rentang yang sesuai
+    const getRandomDataFromRange = async (fileNumber) => {
+      // Cari rentang yang sesuai dengan nomor file
+      const selectedRange = fileRanges.find(range => fileNumber >= range.start && fileNumber <= range.end);
+      if (!selectedRange) {
+        throw new Error(`Nomor '${fileNumber}' tidak ditemukan dalam rentang yang tersedia`);
+      }
+
+      const { baseUrl, start, end } = selectedRange;
+
+      // Loop untuk memastikan data yang dipilih benar-benar ada
+      while (true) {
+        const randomFileNumber = Math.floor(Math.random() * (end - start + 1)) + start;
+        const randomFile = `${randomFileNumber}.bin.gz`;
+
+        try {
+          const data = await fetchDataFromAPI(baseUrl, randomFile);
+          return data;
+        } catch (error) {
+          continue; // Coba lagi jika data tidak ditemukan
+        }
       }
     };
 
     // Handle permintaan berdasarkan target
     if (target === "random") {
+      // Mode random tetap sama seperti sebelumnya
       const results = [];
-      const selectedFiles = new Set(); // Untuk menghindari duplikasi file
-
       for (let i = 0; i < max; i++) {
-        let randomFile, baseUrl;
+        const randomFileNumber = Math.floor(Math.random() * (fileRanges[0].end - fileRanges[0].start + 1)) + fileRanges[0].start;
+        const randomFile = `${randomFileNumber}.bin.gz`;
+        const baseUrl = fileRanges[0].baseUrl;
 
-        // Loop untuk memastikan file yang dipilih benar-benar ada dan tidak duplikat
-        while (true) {
-          // Pilih rentang secara random
-          const randomRange = fileRanges[Math.floor(Math.random() * fileRanges.length)];
-          baseUrl = randomRange.baseUrl;
-          const { start, end } = randomRange;
-
-          // Hasilkan nomor file acak dalam rentang
-          const randomFileNumber = Math.floor(Math.random() * (end - start + 1)) + start;
-          randomFile = `${randomFileNumber}.bin.gz`;
-
-          // Cek apakah file sudah dipilih atau tidak
-          if (selectedFiles.has(randomFile)) continue;
-
-          // Validasi keberadaan file
-          const fileExists = await validateFileExists(baseUrl, randomFile);
-          if (fileExists) {
-            selectedFiles.add(randomFile); // Tandai file sebagai telah dipilih
-            break; // Keluar dari loop jika file valid
-          }
+        try {
+          const data = await fetchDataFromAPI(baseUrl, randomFile);
+          results.push(data);
+        } catch (error) {
+          console.error(`Error fetching random file: ${randomFile}`, error.message);
         }
-
-        // Unduh dan proses data dari file yang dipilih
-        const result = await fetchData(baseUrl, randomFile);
-        results.push(result);
       }
-
-      // Kembalikan hasil sebagai array
       return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -123,44 +110,39 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // Cari baseUrl yang sesuai dengan rentang
-      const selectedRange = fileRanges.find(range => fileNumber >= range.start && fileNumber <= range.end);
-      if (!selectedRange) {
-        return {
-          statusCode: 404,
-          body: JSON.stringify({ error: `File '${target}' tidak ditemukan dalam rentang yang tersedia` })
-        };
-      }
+      try {
+        // Coba ambil data dari API menggunakan target
+        const selectedRange = fileRanges.find(range => fileNumber >= range.start && fileNumber <= range.end);
+        if (!selectedRange) {
+          throw new Error(`Nomor '${fileNumber}' tidak ditemukan dalam rentang yang tersedia`);
+        }
 
-      const baseUrl = selectedRange.baseUrl;
-
-      // Validasi keberadaan file
-      const fileExists = await validateFileExists(baseUrl, target);
-      if (!fileExists) {
-        // Jika file tidak ditemukan, cari file random dari rentang yang sesuai
-        let randomFile;
-        do {
-          const { start, end } = selectedRange;
-          const randomFileNumber = Math.floor(Math.random() * (end - start + 1)) + start;
-          randomFile = `${randomFileNumber}.bin.gz`;
-        } while (!(await validateFileExists(baseUrl, randomFile)));
-
-        // Unduh dan proses file random
-        const result = await fetchData(baseUrl, randomFile);
+        const baseUrl = selectedRange.baseUrl;
+        const data = await fetchDataFromAPI(baseUrl, target);
         return {
           statusCode: 200,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(result)
+          body: JSON.stringify(data)
         };
-      }
+      } catch (error) {
+        console.error(`Error fetching target data: ${target}`, error.message);
 
-      // Jika file ditemukan, unduh dan proses file tersebut
-      const result = await fetchData(baseUrl, target);
-      return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(result)
-      };
+        // Jika gagal, ambil data random dari rentang yang sesuai
+        try {
+          const randomData = await getRandomDataFromRange(fileNumber);
+          return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(randomData)
+          };
+        } catch (fallbackError) {
+          console.error(`Error fetching random data as fallback:`, fallbackError.message);
+          return {
+            statusCode: 500,
+            body: JSON.stringify({ error: "Gagal mengambil data target dan fallback" })
+          };
+        }
+      }
     }
   } catch (error) {
     console.error("Error:", error);
